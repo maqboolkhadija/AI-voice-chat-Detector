@@ -1,31 +1,29 @@
-from groq import Groq
-import streamlit as st
-import tempfile
-from PIL import Image
-import numpy as np
+import os
 import cv2
+import numpy as np
+from PIL import Image
 from ultralytics import YOLO
+import streamlit as st
+from groq import Groq
 from gtts import gTTS
+import tempfile
 
 # Initialize GROQ client
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-# Load YOLO model
+# Load YOLO medium model
 # Replace this:
 model = YOLO("yolov8n.pt")  
 
 # With this:
 model = YOLO("yolov8m.pt")  # medium model → better accuracy for all objects
-st.title("🎯 Smart Object Detector")
-
-option = st.sidebar.radio("Choose info type:", ("Object Use", "Benefits & Drawbacks", "Voice Explanation"))
+st.title("🎯 Safe Object Detector")
+option = st.sidebar.radio("Choose info type:", ("Object Use","Benefits & Drawbacks","Voice Explanation"))
 
 camera_input = st.camera_input("📸 Show an object")
 
 if camera_input:
     image = np.array(Image.open(camera_input))
-
-    # Resize for clarity
     h, w = image.shape[:2]
     max_dim = 960
     scale = max_dim / max(h, w)
@@ -34,63 +32,45 @@ if camera_input:
 
     results = model.predict(image, imgsz=640, verbose=False)[0]
 
-    for box in results.boxes.xyxy:
-        x1, y1, x2, y2 = map(int, box)
-        cv2.rectangle(image, (x1,y1), (x2,y2), (255,0,255), 3)
+    if len(results.boxes.xyxy) == 0:
+        st.warning("No objects detected.")
+    else:
+        for box, cls_id, score in zip(results.boxes.xyxy, results.boxes.cls, results.boxes.conf):
+            x1, y1, x2, y2 = map(int, box)
+            label = model.names[int(cls_id)]
+            cv2.rectangle(image, (x1, y1), (x2, y2), (255,0,255),3)
+            cv2.putText(image, label, (x1,y1-10), cv2.FONT_HERSHEY_SIMPLEX,0.7,(255,255,255),2)
 
-        # Crop object and save temporarily
-        crop = image[y1:y2, x1:x2]
-        pil_crop = Image.fromarray(crop)
-        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-        pil_crop.save(tmp_file.name)
+            # Use GROQ LLM with YOLO label (no image) for explanation
+            if option != "Voice Explanation":
+                prompt_text = {
+                    "Object Use": f"Explain what {label} is used for.",
+                    "Benefits & Drawbacks": f"List benefits and drawbacks of {label}."
+                }[option]
 
-        # Send cropped file to GROQ
-        response = client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[{
-                "role":"user",
-                "content":[
-                    {"type":"text","text":"Identify this object accurately in 1-2 words."},
-                    {"type":"image_file","image_file":{"file_path": tmp_file.name}}
-                ]
-            }],
-            temperature=0.7,
-            max_completion_tokens=150
-        )
-        obj_name = response.choices[0].message.content.strip().split("\n")[0]
-        cv2.putText(image, obj_name, (x1,y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255),2)
+                resp = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role":"user","content":prompt_text}],
+                    temperature=0.7,
+                    max_completion_tokens=200
+                )
+                st.write(f"**Detected Object:** {label}")
+                st.write(resp.choices[0].message.content)
+            else:
+                resp = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role":"user","content":f"Explain {label} simply for voice."}],
+                    temperature=0.7,
+                    max_completion_tokens=200
+                )
+                explanation_text = resp.choices[0].message.content
+                st.write(f"**Detected Object:** {label}")
+                st.write(explanation_text)
+                tts = gTTS(explanation_text)
+                tmp_mp3 = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+                tts.save(tmp_mp3.name)
+                st.audio(tmp_mp3.name, format="audio/mp3")
 
-        # Generate explanation
-        if option != "Voice Explanation":
-            prompt_text = {
-                "Object Use": f"Explain what {obj_name} is used for.",
-                "Benefits & Drawbacks": f"List benefits and drawbacks of {obj_name}."
-            }[option]
-
-            resp = client.chat.completions.create(
-                model="meta-llama/llama-4-scout-17b-16e-instruct",
-                messages=[{"role":"user","content":prompt_text}],
-                temperature=0.7,
-                max_completion_tokens=200
-            )
-            st.write(f"**Detected Object:** {obj_name}")
-            st.write(resp.choices[0].message.content)
-
-        else:  # Voice
-            resp = client.chat.completions.create(
-                model="meta-llama/llama-4-scout-17b-16e-instruct",
-                messages=[{"role":"user","content":f"Explain {obj_name} simply for voice."}],
-                temperature=0.7,
-                max_completion_tokens=200
-            )
-            explanation_text = resp.choices[0].message.content
-            st.write(f"**Detected Object:** {obj_name}")
-            st.write(explanation_text)
-            tts = gTTS(explanation_text)
-            tmp_mp3 = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-            tts.save(tmp_mp3.name)
-            st.audio(tmp_mp3.name, format="audio/mp3")
-
-    st.image(image, channels="RGB", use_column_width=True)
+        st.image(image, channels="RGB", use_column_width=True)
 else:
-    st.warning("📷 Camera input not detected. Allow camera or upload image.")
+    st.warning("📷 Camera input not detected.")
