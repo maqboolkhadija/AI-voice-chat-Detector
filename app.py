@@ -18,7 +18,7 @@ except Exception:
     st.stop()
 
 # --------------------------
-# Load YOLOv8 medium model for better accuracy
+# Load YOLOv8 medium model
 # --------------------------
 # Replace this:
 model = YOLO("yolov8n.pt")  
@@ -30,53 +30,55 @@ model = YOLO("yolov8m.pt")  # medium model → better accuracy for all objects
 # --------------------------
 st.set_page_config(page_title="Smart Object Detector", layout="wide")
 st.markdown("<h1 style='text-align:center;color:#4B0082'>🎯 Smart Object Detection</h1>", unsafe_allow_html=True)
-st.markdown("<h4 style='text-align:center;color:#4B0082'>Automatically detects objects, explains them, and plays voice!</h4>", unsafe_allow_html=True)
+st.markdown("<h4 style='text-align:center;color:#4B0082'>Detects objects accurately and explains them automatically!</h4>", unsafe_allow_html=True)
 st.markdown("---")
 
-# Sidebar with 3 options
+# Sidebar 3 options
 st.sidebar.title("💡 Info Options")
 option = st.sidebar.radio(
     "Choose info type:",
     ("Object Use", "Benefits & Drawbacks", "Voice Explanation")
 )
-st.sidebar.markdown("⚡ Show an object to the camera. It will be automatically recognized.")
+st.sidebar.markdown("⚡ Show an object to the camera. It will be automatically recognized and explained.")
 
+# --------------------------
 # Camera input
+# --------------------------
 camera_input = st.camera_input("📸 Show an object to your camera")
 
 if camera_input is not None:
-    # Convert PIL to OpenCV image
+    # Convert to OpenCV
     image = np.array(Image.open(camera_input))
 
-    # --------------------------
-    # Increase resolution for YOLO inference
-    # --------------------------
-    max_dim = 960  # Resize longest side to 960px
+    # Resize for higher resolution
+    max_dim = 960
     h, w = image.shape[:2]
     scale = max_dim / max(h, w)
     if scale < 1.0:
-        new_w, new_h = int(w * scale), int(h * scale)
-        image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+        image = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
 
     # YOLO detection
     results = model.predict(image, imgsz=640, verbose=False)[0]
 
     if len(results.boxes.xyxy) == 0:
-        st.warning("No objects detected. Try again with better lighting or reposition the object.")
+        st.warning("No objects detected. Try better lighting or reposition the object.")
     else:
-        # Draw bounding boxes and identify objects
+        # Draw bounding boxes and identify objects via GROQ
         for idx, box in enumerate(results.boxes.xyxy):
             x1, y1, x2, y2 = map(int, box)
-            cv2.rectangle(image, (x1, y1), (x2, y2), (255, 0, 255), 3)
             cropped_obj = image[y1:y2, x1:x2]
+            cv2.rectangle(image, (x1, y1), (x2, y2), (255, 0, 255), 3)
+
+            # Convert crop to PIL (for future vision API if needed)
+            pil_crop = Image.fromarray(cropped_obj)
 
             # --------------------------
-            # Automatic object recognition using GROQ
+            # Automatic object recognition via GROQ (text prompt)
             # --------------------------
             prompt = (
                 "You are a smart assistant. "
-                "Identify this object in one word or short phrase. "
-                "The object may be small, thin, or uncommon like comb, marker, charger, glass bottle, etc."
+                "Identify this object accurately in 1-2 words. "
+                "It may be small, thin, or uncommon like comb, marker, charger, glass bottle, etc."
             )
             response = client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
@@ -89,7 +91,7 @@ if camera_input is not None:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
             # --------------------------
-            # Display info according to sidebar
+            # Sidebar-selected info
             # --------------------------
             if option == "Object Use":
                 msg_use = f"Explain the use of {object_name} in simple words."
@@ -121,8 +123,8 @@ if camera_input is not None:
                 tts.save(tmp_file.name)
                 st.audio(tmp_file.name, format="audio/mp3")
 
-        # Display final image
+        # Show final image with bounding boxes
         st.image(image, channels="RGB", caption="Detected Objects", use_column_width=True)
 
 else:
-    st.warning("📷 Camera input not detected. Please allow camera or upload image.")
+    st.warning("📷 Camera input not detected. Please allow camera or upload an image.")
