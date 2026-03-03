@@ -52,10 +52,11 @@ camera_input = st.camera_input("📸 Show an object to your camera")
 if camera_input is not None:
     # Convert PIL to OpenCV image
     image = np.array(Image.open(camera_input))
-results = model.predict(image, imgsz=640, verbose=False)[0]
+    results = model.predict(image, verbose=False)[0]
+
     # Draw bounding boxes and labels
-for box, cls_id, score in zip(results.boxes.xyxy, results.boxes.cls, results.boxes.conf):
-    x1, y1, x2, y2 = map(int, box)
+    for box, cls_id, score in zip(results.boxes.xyxy, results.boxes.cls, results.boxes.conf):
+        x1, y1, x2, y2 = map(int, box)
         label = f"{model.names[int(cls_id)]} ({score:.2f})"
         # Bounding box
         cv2.rectangle(image, (x1, y1), (x2, y2), (75, 0, 130), 3)
