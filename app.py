@@ -21,8 +21,11 @@ except Exception as e:
 # --------------------------
 # Load YOLOv8 model
 # --------------------------
-model = YOLO("yolov8n.pt")  # Lightweight model for fast detection
+# Currently:
+model = YOLO("yolov8n.pt")
 
+# Replace with small model for better accuracy:
+model = YOLO("yolov8s.pt")  # YOLOv8 small model, more accurate
 # --------------------------
 # Streamlit page layout
 # --------------------------
