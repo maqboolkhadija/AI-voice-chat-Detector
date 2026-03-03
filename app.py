@@ -12,23 +12,42 @@ import tempfile
 # --------------------------
 # Initialize GROQ client securely
 # --------------------------
-client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+try:
+    client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+except Exception as e:
+    st.error("❌ GROQ API Key not found! Add it in Streamlit secrets.")
+    st.stop()
 
 # --------------------------
 # Load YOLOv8 model
 # --------------------------
-st.title("🕶️ Real-Time Object Detection & Info")
-st.text("Show any object to your camera. YOLOv8 will detect it and give details!")
+model = YOLO("yolov8n.pt")  # Lightweight model for fast detection
 
-model = YOLO("yolov8n.pt")  # lightweight YOLOv8 model
+# --------------------------
+# Streamlit page layout
+# --------------------------
+st.set_page_config(page_title="🎯 Real-Time Object Detector", page_icon="🕶️", layout="wide")
+st.markdown("<h1 style='text-align: center; color: #4B0082;'>🎯 YOLOv8 Object Detection App</h1>", unsafe_allow_html=True)
+st.markdown("<h3 style='text-align: center; color: #4B0082;'>Show any object to your camera and explore it!</h3>", unsafe_allow_html=True)
+st.markdown("---")
+
+# --------------------------
+# Sidebar with 3 always-visible options
+# --------------------------
+st.sidebar.title("💡 Object Info Options")
+option = st.sidebar.radio(
+    "Choose what info you want:",
+    ("Object Use", "Benefits & Drawbacks", "Voice Explanation")
+)
+st.sidebar.markdown("⚡ Instructions: Show an object to your camera. Choose an option from above to learn more.")
 
 # --------------------------
 # Camera input
 # --------------------------
-camera_input = st.camera_input("Show object to your camera")
+camera_input = st.camera_input("📸 Show an object to your camera")
 
-if camera_input:
-    # Convert PIL image to OpenCV format
+if camera_input is not None:
+    # Convert PIL to OpenCV image
     image = np.array(Image.open(camera_input))
     results = model.predict(image, verbose=False)[0]
 
@@ -36,44 +55,45 @@ if camera_input:
     for box, cls_id, score in zip(results.boxes.xyxy, results.boxes.cls, results.boxes.conf):
         x1, y1, x2, y2 = map(int, box)
         label = f"{model.names[int(cls_id)]} ({score:.2f})"
-        cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
-        cv2.rectangle(image, (x1, y1 - 20), (x1 + w, y1), (0, 255, 0), -1)
-        cv2.putText(image, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+        # Bounding box
+        cv2.rectangle(image, (x1, y1), (x2, y2), (75, 0, 130), 3)
+        # Label background
+        (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+        cv2.rectangle(image, (x1, y1 - 25), (x1 + w, y1), (75, 0, 130), -1)
+        # Label text
+        cv2.putText(image, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-    # Display the image
-    st.image(image, channels="RGB")
+    # Display processed image
+    st.image(image, channels="RGB", caption="Detected Objects", use_column_width=True)
 
-    # --------------------------
-    # Sidebar options
-    # --------------------------
-    st.sidebar.title("Object Info Options")
+    # Get the first detected object
     detected_object = model.names[int(results.boxes.cls[0])] if len(results.boxes.cls) > 0 else None
 
+    # If an object is detected
     if detected_object:
-        option = st.sidebar.radio(
-            "Choose an option:",
-            ("Object Use", "Benefits & Drawbacks", "Voice Explanation")
-        )
+        st.markdown(f"### 🔹 Detected Object: {detected_object}")
 
+        # Option 1: Object Use
         if option == "Object Use":
             message = f"Explain the use of {detected_object} in simple words."
             response = client.chat.completions.create(
                 messages=[{"role": "user", "content": message}],
                 model="llama-3.3-70b-versatile",
             )
-            st.subheader(f"Use of {detected_object}")
-            st.write(response.choices[0].message.content)
+            st.markdown("**Use Explanation:**")
+            st.info(response.choices[0].message.content)
 
+        # Option 2: Benefits & Drawbacks
         elif option == "Benefits & Drawbacks":
             message = f"What are the benefits and drawbacks of {detected_object}?"
             response = client.chat.completions.create(
                 messages=[{"role": "user", "content": message}],
                 model="llama-3.3-70b-versatile",
             )
-            st.subheader(f"Benefits & Drawbacks of {detected_object}")
-            st.write(response.choices[0].message.content)
+            st.markdown("**Benefits & Drawbacks:**")
+            st.warning(response.choices[0].message.content)
 
+        # Option 3: Voice Explanation
         elif option == "Voice Explanation":
             message = f"Explain {detected_object} in a simple sentence for speaking."
             response = client.chat.completions.create(
@@ -81,11 +101,13 @@ if camera_input:
                 model="llama-3.3-70b-versatile",
             )
             explanation_text = response.choices[0].message.content
-            st.subheader(f"Voice Explanation of {detected_object}")
-            st.write(explanation_text)
+            st.markdown("**Voice Explanation:**")
+            st.success(explanation_text)
 
             # Convert text to speech
             tts = gTTS(explanation_text)
             tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
             tts.save(tmp_file.name)
             st.audio(tmp_file.name, format="audio/mp3")
+else:
+    st.warning("📷 Camera input not detected. Please allow access or upload an image.")
